@@ -1,139 +1,74 @@
-# CreditPulse 💳
+# CreditPulse
+Causal AI credit risk assessment for East African digital lending markets.
 
-**A Causal AI System for Equitable Credit Risk Assessment**
-
-[![CI](https://github.com/B-Omare/creditpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/B-Omare/creditpulse/actions/workflows/ci.yml)
-[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://python.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-> *A full-stack credit risk intelligence platform built for East African digital lending markets.*
-
-CreditPulse goes beyond a simple credit score by combining:
-
-- 🔍 **Causal reasoning** — understanding *WHY* borrowers default, not just who does
-- 📊 **Bayesian uncertainty** — a probability range, not a single score
-- 📱 **M-Pesa NLP** — reading transaction descriptions for behavioural signals  
-- 🧾 **Explainable AI** — plain-English explanations for borrowers and regulators
-
-Built for the East African context: M-Pesa mobile money, thin credit files, smallholder farmers, and CBK regulatory standards.
-
----
-
-## Quickstart
-
+## Setup
 ```bash
-git clone https://github.com/B-Omare/creditpulse.git
-cd creditpulse
-
 conda create -n creditpulse python=3.11 -y
 conda activate creditpulse
-pip install -e ".[dev]"
+pip install -e .
+pip install pandas numpy xgboost==2.1.4 scikit-learn joblib pyarrow
+pip install fastapi uvicorn streamlit pydantic httpx
+pip install dowhy econml statsmodels networkx
+pip install langchain langchain-community langchain-text-splitters
+pip install langchain-huggingface chromadb bertopic sentence-transformers
+pip install shap scikit-survival
+```
 
-# Run tests
-pytest tests/ -v
+## Run the Pipeline
+```bash
+# Phase 2: Clean data
+python creditpulse/ingestion/clean.py
 
-# Start the API
+# Phase 3: Causal analysis
+python creditpulse/causal/dag.py
+python creditpulse/causal/diff_in_diff.py
+python creditpulse/causal/regression_discontinuity.py
+
+# Phase 4: NLP
+python creditpulse/nlp/rag_pipeline.py
+python creditpulse/nlp/topic_model.py
+
+# Phase 5: Models
+python creditpulse/models/xgboost_model.py
+python creditpulse/models/bayesian_model.py
+python creditpulse/models/survival_model.py
+python creditpulse/models/fraud_detector.py
+
+# Phase 6: Explainability
+python creditpulse/explainability/fairness_audit.py
+python creditpulse/explainability/model_card.py
+```
+
+## Run the Application
+```bash
+# Terminal 1 — Start the API
 uvicorn creditpulse.api.main:app --reload
 
-# Launch the Streamlit dashboard
+# Terminal 2 — Start the dashboard
 streamlit run app/streamlit_app.py
 ```
 
-## Architecture
+Then open:
+- API docs: http://127.0.0.1:8000/docs
+- Dashboard: http://localhost:8501
 
-```
-Raw Data (Kaggle / M-Pesa)
-        │
-        ▼
-  Ingestion & ETL ──── IFRS 9 Schema
-        │
-        ├── Causal Analysis (DoWhy, DiD, RD)
-        ├── ML Models (XGBoost, Bayesian, Survival)
-        └── NLP (BERT, BERTopic, RAG Chatbot)
-                │
-                ▼
-          FastAPI REST
-                │
-                ▼
-      Streamlit Dashboard
-     ┌──────┬──────┬──────┐
-     │ Officer│Borrower│Regulator│
-```
-
-## The 7 Phases
-
-| Phase | What You Build |
-|-------|---------------|
-| 1 | Project scaffold, Docker, CI/CD |
-| 2 | Data ingestion, ETL, IFRS 9 schema |
-| 3 | Causal inference (DoWhy, DiD, RD) |
-| 4 | NLP — M-Pesa analysis + RAG chatbot |
-| 5 | ML models (XGBoost, Bayesian, Survival Forest) |
-| 6 | Explainability — SHAP, LIME, model card |
-| 7 | FastAPI + Streamlit dashboard |
-
-## Data Sources
-
-| Dataset | Source |
-|---------|--------|
-| Home Credit Default Risk | [Kaggle](https://kaggle.com/competitions/home-credit-default-risk) |
-| Lending Club | [Kaggle](https://kaggle.com/datasets/wordsforthewise/lending-club) |
-| World Bank FinScope Kenya | [finmark.org.za](https://finmark.org.za/finscopekenya) |
-| CBK Annual Reports | [centralbank.go.ke](https://centralbank.go.ke/publications) |
-| M-Pesa (simulated) | Generated in Phase 2 |
-
-## API
-
+## Docker (requires 4GB+ free RAM)
 ```bash
-# Health check
-curl http://localhost:8000/health
-
-# Score a borrower
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-    "age_years": 32,
-    "employment_years": 4,
-    "amt_income_total": 240000,
-    "amt_credit": 120000,
-    "amt_annuity": 8000,
-    "ext_source_mean": 0.62,
-    "cnt_children": 1
-  }'
+docker-compose up --build
 ```
 
-Response:
-```json
-{
-  "pd_point_estimate": 0.087,
-  "pd_lower_95": 0.012,
-  "pd_upper_95": 0.163,
-  "ifrs9_stage": 1,
-  "ecl_estimate": 4698.0,
-  "recommendation": "APPROVE",
-  "explanation": "PD of 8.7% (95% CI: 1.2%–16.3%). IFRS 9 Stage 1.",
-  "risk_factors": []
-}
-```
+## Structure
+- `creditpulse/` — core Python package
+- `data/` — raw, processed, and simulated datasets
+- `app/` — Streamlit dashboard
+- `tests/` — pytest test suite
+- `reports/` — charts, model card, fairness metrics
 
-## Docker
-
-```bash
-docker compose up
-# API: http://localhost:8000
-# Dashboard: http://localhost:8501
-```
-
-## Pipeline
-
-```bash
-snakemake --cores 4
-```
-
-## License
-
-MIT — see [LICENSE](LICENSE)
-
----
-
-*Built by [B-Omare](https://github.com/B-Omare)*
+## Results
+| Model | Metric | Value |
+|-------|--------|-------|
+| XGBoost | AUC-ROC | 0.7415 |
+| XGBoost | Gini | 0.4830 |
+| Survival Forest | C-index | 0.8130 |
+| DiD Experiment | P-value | 0.002 |
+| RD Analysis | P-value | 0.0028 |
