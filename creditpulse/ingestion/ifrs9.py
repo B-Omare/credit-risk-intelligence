@@ -16,6 +16,7 @@ OUTPUT_PATH = Path("data/processed/loans_ifrs9.parquet")
 
 def assign_stage(df: pd.DataFrame) -> pd.DataFrame:
     """Assign IFRS 9 stages based on available signals."""
+    df = df.copy()
     df["IFRS9_STAGE"] = 1  # Default: performing
 
     # Stage 2: significant credit risk increase
@@ -32,8 +33,10 @@ def assign_stage(df: pd.DataFrame) -> pd.DataFrame:
 def compute_ecl(df: pd.DataFrame) -> pd.DataFrame:
     """
     Simplified Expected Credit Loss calculation.
-    ECL = PD × LGD × EAD
+    ECL = PD x LGD x EAD  (always non-negative)
     """
+    df = df.copy()
+
     # Proxy PD from external sources (0-1 scale, inverted)
     if "EXT_SOURCE_MEAN" in df.columns:
         df["PD_PROXY"] = 1 - df["EXT_SOURCE_MEAN"].clip(0, 1)
@@ -41,7 +44,13 @@ def compute_ecl(df: pd.DataFrame) -> pd.DataFrame:
         df["PD_PROXY"] = 0.05  # 5% default
 
     df["LGD"] = 0.45  # Basel standard for unsecured consumer loans
-    df["EAD"] = df.get("AMT_CREDIT", pd.Series(0, index=df.index))
+
+    # EAD is exposure at default — must be non-negative
+    if "AMT_CREDIT" in df.columns:
+        df["EAD"] = df["AMT_CREDIT"].clip(lower=0)
+    else:
+        df["EAD"] = pd.Series(0.0, index=df.index)
+
     df["ECL"] = df["PD_PROXY"] * df["LGD"] * df["EAD"]
 
     return df
@@ -53,7 +62,7 @@ def apply_ifrs9(input_path: Path = INPUT_PATH, output_path: Path = OUTPUT_PATH) 
     df = compute_ecl(df)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(output_path, index=False)
-    logger.info(f"IFRS 9 schema applied → {output_path}")
+    logger.info("IFRS 9 schema applied -> %s", output_path)
     return df
 
 
