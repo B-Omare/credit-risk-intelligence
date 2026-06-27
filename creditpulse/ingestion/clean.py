@@ -1,98 +1,87 @@
 """
-CreditPulse - Data Cleaning & IFRS 9 Schema
-Phase 2: Loads raw Home Credit data, cleans it, and adds IFRS 9 stage labels.
+Phase 2 — Data ingestion and cleaning.
+Transforms raw Home Credit CSV into a clean parquet file.
 """
 
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import logging
 
-# ── Paths ──────────────────────────────────────────────────────────────────
-RAW = Path("data/raw")
-PROCESSED = Path("data/processed")
-PROCESSED.mkdir(exist_ok=True)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+RAW_PATH = Path("data/raw/application_train.csv")
+OUTPUT_PATH = Path("data/processed/loans_clean.parquet")
 
 
-def load_raw_data():
-    """Load the main application training file."""
-    print("Loading raw data...")
-    df = pd.read_csv(RAW / "application_train.csv")
-    print(f"  Loaded {len(df):,} rows and {df.shape[1]} columns")
+COLS_TO_KEEP = [
+    "SK_ID_CURR", "TARGET", "CODE_GENDER", "FLAG_OWN_CAR", "FLAG_OWN_REALTY",
+    "CNT_CHILDREN", "AMT_INCOME_TOTAL", "AMT_CREDIT", "AMT_ANNUITY",
+    "AMT_GOODS_PRICE", "NAME_INCOME_TYPE", "NAME_EDUCATION_TYPE",
+    "NAME_FAMILY_STATUS", "NAME_HOUSING_TYPE", "REGION_POPULATION_RELATIVE",
+    "DAYS_BIRTH", "DAYS_EMPLOYED", "DAYS_REGISTRATION", "DAYS_ID_PUBLISH",
+    "OWN_CAR_AGE", "FLAG_MOBIL", "FLAG_EMP_PHONE", "FLAG_WORK_PHONE",
+    "FLAG_CONT_MOBILE", "FLAG_PHONE", "FLAG_EMAIL", "CNT_FAM_MEMBERS",
+    "REGION_RATING_CLIENT", "REGION_RATING_CLIENT_W_CITY",
+    "WEEKDAY_APPR_PROCESS_START", "HOUR_APPR_PROCESS_START",
+    "REG_REGION_NOT_LIVE_REGION", "REG_REGION_NOT_WORK_REGION",
+    "LIVE_REGION_NOT_WORK_REGION", "REG_CITY_NOT_LIVE_CITY",
+    "REG_CITY_NOT_WORK_CITY", "LIVE_CITY_NOT_WORK_CITY",
+    "EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3",
+    "AMT_REQ_CREDIT_BUREAU_YEAR",
+]
+
+ANOMALY_REPLACEMENTS = {
+    "DAYS_EMPLOYED": 365243,
+}
+
+
+def load_raw(path: Path = RAW_PATH) -> pd.DataFrame:
+    logger.info(f"Loading raw data from {path}")
+    df = pd.read_csv(path, usecols=lambda c: c in COLS_TO_KEEP)
+    logger.info(f"Loaded {len(df):,} rows, {df.shape[1]} columns")
     return df
 
 
-def clean_data(df):
-    """Basic cleaning — handle missing values and outliers."""
-    print("Cleaning data...")
-
-    # DAYS_EMPLOYED has 365243 as a code for 'unemployed' — replace with 0
-    df["DAYS_EMPLOYED"] = df["DAYS_EMPLOYED"].replace(365243, 0)
-
-    # Fill missing EXT_SOURCE values with median
-    for col in ["EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3"]:
-        df[col] = df[col].fillna(df[col].median())
-
-    # Fill missing AMT_ANNUITY with median
-    df["AMT_ANNUITY"] = df["AMT_ANNUITY"].fillna(df["AMT_ANNUITY"].median())
-
-    print(f"  Cleaned. Missing values in TARGET: {df['TARGET'].isna().sum()}")
+def fix_anomalies(df: pd.DataFrame) -> pd.DataFrame:
+    for col, sentinel in ANOMALY_REPLACEMENTS.items():
+        if col in df.columns:
+            mask = df[col] == sentinel
+            logger.info(f"Replacing {mask.sum()} anomalous values in {col}")
+            df.loc[mask, col] = np.nan
     return df
 
 
-def engineer_features(df):
-    """Create new features from existing columns."""
-    print("Engineering features...")
-
-    # What percentage of their life have they been employed?
-    df["days_employed_pct"] = df["DAYS_EMPLOYED"] / df["DAYS_BIRTH"]
-
-    # Loan amount relative to income
-    df["income_to_credit_ratio"] = df["AMT_INCOME_TOTAL"] / df["AMT_CREDIT"]
-
-    # Average of credit bureau scores
-    ext_cols = ["EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3"]
-    df["ext_source_mean"] = df[ext_cols].mean(axis=1)
-    df["ext_source_std"] = df[ext_cols].std(axis=1)
-
-    print("  Features engineered.")
+def impute_missing(df: pd.DataFrame) -> pd.DataFrame:
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object"]).columns.tolist()
+    df[num_cols] = df[num_cols].fillna(df[num_cols].median())
+    df[cat_cols] = df[cat_cols].fillna("Unknown")
     return df
 
 
-def add_ifrs9_stage(df, default_col="TARGET"):
-    """
-    Add IFRS 9 stage based on default flag.
-    Stage 1 = performing, Stage 2 = watch, Stage 3 = non-performing.
-    Will be updated with model probabilities in Phase 5.
-    """
-    print("Adding IFRS 9 stage labels...")
-
-    conditions = [
-        df[default_col] == 0,
-        df[default_col] == 1,
-    ]
-    choices = [1, 3]
-    df["ifrs9_stage"] = np.select(conditions, choices, default=2)
-
-    print(f"  Stage distribution:\n{df['ifrs9_stage'].value_counts().sort_index()}")
+def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
+    binary_map = {"Y": 1, "N": 0, "M": 1, "F": 0, "XNA": np.nan}
+    for col in ["CODE_GENDER", "FLAG_OWN_CAR", "FLAG_OWN_REALTY"]:
+        if col in df.columns:
+            df[col] = df[col].map(binary_map)
+    df = pd.get_dummies(df, columns=["NAME_INCOME_TYPE", "NAME_EDUCATION_TYPE",
+                                      "NAME_FAMILY_STATUS", "NAME_HOUSING_TYPE",
+                                      "WEEKDAY_APPR_PROCESS_START"], drop_first=True)
     return df
 
 
-def save_data(df):
-    """Save cleaned data as parquet — faster and smaller than CSV."""
-    output_path = PROCESSED / "loans_clean.parquet"
+def clean(input_path: Path = RAW_PATH, output_path: Path = OUTPUT_PATH) -> pd.DataFrame:
+    df = load_raw(input_path)
+    df = fix_anomalies(df)
+    df = impute_missing(df)
+    df = encode_categoricals(df)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(output_path, index=False)
-    print(f"  Saved to {output_path}")
-    print(f"  File size: {output_path.stat().st_size / 1024 / 1024:.1f} MB")
-
-
-def main():
-    df = load_raw_data()
-    df = clean_data(df)
-    df = engineer_features(df)
-    df = add_ifrs9_stage(df)
-    save_data(df)
-    print("\nPhase 2 data cleaning complete!")
+    logger.info(f"Saved clean data to {output_path} — {len(df):,} rows")
+    return df
 
 
 if __name__ == "__main__":
-    main()
+    clean()
