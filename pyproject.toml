@@ -92,3 +92,8 @@ addopts = "-v --tb=short"
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+ignore = ["E501"]
