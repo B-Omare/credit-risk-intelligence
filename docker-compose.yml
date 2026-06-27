@@ -3,22 +3,25 @@ version: "3.9"
 services:
   api:
     build: .
+    container_name: creditpulse_api
     ports:
       - "8000:8000"
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - ./data:/app/data
       - ./models:/app/models
-    restart: unless-stopped
+      - ./reports:/app/reports
+    environment:
+      - PYTHONUNBUFFERED=1
 
-  streamlit:
+  dashboard:
     build: .
-    command: streamlit run app/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+    container_name: creditpulse_dashboard
     ports:
       - "8501:8501"
-    environment:
-      - API_URL=http://api:8000
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./reports:/app/reports
+    command: streamlit run app/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
     depends_on:
       - api
-    restart: unless-stopped

@@ -4,20 +4,32 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
+    gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy package definition first (layer caching)
+# Copy package definition first (for layer caching)
 COPY pyproject.toml .
-COPY creditpulse/__init__.py creditpulse/
+COPY creditpulse/ ./creditpulse/
 
-# Install base + API dependencies
-RUN pip install --no-cache-dir -e ".[api]"
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn \
+    pandas \
+    numpy \
+    xgboost==2.1.4 \
+    scikit-learn \
+    joblib \
+    pyarrow \
+    pydantic \
+    httpx
 
-# Copy the rest of the source
+# Copy the rest of the project
 COPY . .
 
+# Expose API port
 EXPOSE 8000
 
+# Start the FastAPI server
 CMD ["uvicorn", "creditpulse.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

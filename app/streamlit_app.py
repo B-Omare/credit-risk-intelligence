@@ -1,17 +1,17 @@
 """
-Phase 7 — CreditPulse Streamlit Dashboard.
-Three views: Loan Officer, Borrower Explainer, Regulator.
+CreditPulse - Three-View Streamlit Dashboard
+Phase 7: Interactive dashboard for loan officers, executives, and regulators.
 """
 
 import streamlit as st
+import requests
 import pandas as pd
 import numpy as np
-import requests
-import json
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 from pathlib import Path
 
-API_URL = "http://localhost:8000"
-
+# ── Page config ───────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="CreditPulse",
     page_icon="💳",
@@ -19,217 +19,291 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.markdown("""
-<style>
-    .risk-low { color: #2ecc71; font-weight: bold; }
-    .risk-medium { color: #f39c12; font-weight: bold; }
-    .risk-high { color: #e74c3c; font-weight: bold; }
-    .metric-card { background: #f8f9fa; padding: 1rem; border-radius: 8px; margin: 0.5rem 0; }
-</style>
-""", unsafe_allow_html=True)
+API_URL = "http://127.0.0.1:8000"
 
-VIEWS = ["🏦 Loan Officer", "👤 Borrower Explainer", "📊 Regulator Dashboard"]
+# ── Sidebar ───────────────────────────────────────────────────────────────
+st.sidebar.image("https://img.icons8.com/color/96/000000/bank-card-front-side.png",
+                 width=80)
+st.sidebar.title("CreditPulse")
+st.sidebar.markdown("*Causal AI Credit Risk Assessment*")
+st.sidebar.markdown("---")
 
+view = st.sidebar.radio(
+    "Select View",
+    ["🏦 Loan Officer", "📊 Executive", "📋 Policy & Compliance"]
+)
 
-def sidebar():
-    st.sidebar.image("https://via.placeholder.com/200x60?text=CreditPulse", width=200)
-    st.sidebar.title("CreditPulse")
-    st.sidebar.caption("Causal AI Credit Risk — East Africa")
-    view = st.sidebar.radio("View", VIEWS)
-    st.sidebar.markdown("---")
-    st.sidebar.info("v0.1.0 | Built for CBK-regulated lenders")
-    return view
+# ══════════════════════════════════════════════════════════════════════════
+# VIEW 1 — LOAN OFFICER
+# ══════════════════════════════════════════════════════════════════════════
+if view == "🏦 Loan Officer":
+    st.title("🏦 Loan Officer View")
+    st.markdown("Score an individual borrower and get a plain-language explanation.")
+    st.markdown("---")
 
+    col1, col2 = st.columns(2)
 
-def borrower_input_form():
-    with st.form("borrower_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            age = st.number_input("Age (years)", 18, 80, 32)
-            income = st.number_input("Annual Income (KES)", 10000, 5000000, 240000, step=10000)
-            employment = st.number_input("Employment years", 0.0, 40.0, 3.5, step=0.5)
-            children = st.number_input("Dependants", 0, 10, 1)
-        with col2:
-            loan_amount = st.number_input("Loan Amount (KES)", 5000, 2000000, 50000, step=5000)
-            annuity = st.number_input("Monthly Repayment (KES)", 500, 100000, 4500, step=500)
-            ext_score = st.slider("External Credit Score", 0.0, 1.0, 0.55, step=0.01,
-                                  help="Aggregated external bureau score (0=poor, 1=excellent)")
+    with col1:
+        st.subheader("Borrower Details")
+        name           = st.text_input("Borrower Name", "Jane Wanjiku")
+        ext_source_2   = st.slider("Credit Bureau Score", 0.0, 1.0, 0.65,
+                                    help="Higher = better credit history")
+        income_ratio   = st.slider("Income to Credit Ratio", 0.0, 2.0, 0.70,
+                                    help="Higher = more affordable loan")
+        employed_pct   = st.slider("Employment Stability", 0.0, 1.0, 0.40,
+                                    help="Higher = longer employment history")
+        amt_credit     = st.number_input("Loan Amount (KES)", 10000, 2000000, 300000)
+        amt_income     = st.number_input("Annual Income (KES)", 10000, 5000000, 180000)
 
-        submitted = st.form_submit_button("Assess Credit Risk", type="primary")
+    with col2:
+        st.subheader("Risk Assessment")
 
-    if submitted:
-        return {
-            "age_years": age,
-            "employment_years": employment,
-            "amt_income_total": income,
-            "amt_credit": loan_amount,
-            "amt_annuity": annuity,
-            "ext_source_mean": ext_score,
-            "cnt_children": children,
-        }
-    return None
+        if st.button("🔍 Score Borrower", type="primary"):
+            payload = {
+                "name": name,
+                "EXT_SOURCE_1": ext_source_2 * 0.9,
+                "EXT_SOURCE_2": ext_source_2,
+                "EXT_SOURCE_3": ext_source_2 * 1.1 if ext_source_2 * 1.1 <= 1 else 1.0,
+                "ext_source_mean": ext_source_2,
+                "ext_source_std": 0.08,
+                "income_to_credit_ratio": income_ratio,
+                "days_employed_pct": employed_pct,
+                "AMT_CREDIT": amt_credit,
+                "AMT_INCOME_TOTAL": amt_income,
+                "AMT_ANNUITY": amt_credit / 12,
+                "DAYS_BIRTH": -13000,
+                "DAYS_EMPLOYED": -2000,
+            }
 
+            with st.spinner("Scoring borrower..."):
+                try:
+                    # Score
+                    score_resp = requests.post(
+                        f"{API_URL}/score", json=payload, timeout=30
+                    ).json()
 
-def call_api(payload: dict) -> dict | None:
+                    # Explain
+                    explain_resp = requests.post(
+                        f"{API_URL}/explain", json=payload, timeout=30
+                    ).json()
+
+                    prob  = score_resp["default_probability"]
+                    stage = score_resp["ifrs9_stage"]
+                    label = score_resp["risk_label"]
+                    fraud = score_resp["fraud_flag"]
+                    b_low = score_resp["bayesian_ci_low"]
+                    b_hi  = score_resp["bayesian_ci_high"]
+
+                    # ── Metrics ───────────────────────────────────────────
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Default Probability", f"{prob:.1%}")
+                    m2.metric("IFRS 9 Stage", f"Stage {stage}")
+                    m3.metric("Risk Label", label)
+
+                    # ── Fraud flag ────────────────────────────────────────
+                    if fraud:
+                        st.error("⚠️ Fraud flag raised — refer to fraud team")
+                    else:
+                        st.success("✅ No fraud signals detected")
+
+                    # ── Bayesian uncertainty ───────────────────────────────
+                    st.markdown("**Bayesian Uncertainty Range**")
+                    st.progress(prob)
+                    st.caption(
+                        f"95% credible interval: "
+                        f"[{b_low:.1%} — {b_hi:.1%}]"
+                    )
+
+                    # ── Risk gauge ────────────────────────────────────────
+                    fig, ax = plt.subplots(figsize=(6, 1.5))
+                    colour = ("#2ECC71" if prob < 0.10
+                              else "#E67E22" if prob < 0.30
+                              else "#E74C3C")
+                    ax.barh(["Risk"], [prob], color=colour, height=0.4)
+                    ax.barh(["Risk"], [1 - prob], left=[prob],
+                            color="#EEEEEE", height=0.4)
+                    ax.axvline(0.10, color="#2ECC71", linestyle="--",
+                               linewidth=1, alpha=0.7)
+                    ax.axvline(0.30, color="#E67E22", linestyle="--",
+                               linewidth=1, alpha=0.7)
+                    ax.set_xlim(0, 1)
+                    ax.set_xlabel("Default Probability")
+                    ax.set_title(f"{name} — {label}", fontweight="bold")
+                    ax.grid(False)
+                    st.pyplot(fig)
+                    plt.close()
+
+                    # ── Plain-language explanation ─────────────────────────
+                    st.markdown("**Decision Explanation**")
+                    decision = explain_resp["decision"].upper()
+                    box_colour = (
+                        "🟢" if decision == "APPROVED" else "🔴"
+                    )
+                    st.info(
+                        f"{box_colour} **{decision}**\n\n"
+                        f"{explain_resp['explanation']}"
+                    )
+
+                except Exception as e:
+                    st.error(f"API error: {e}. Make sure the API is running.")
+
+# ══════════════════════════════════════════════════════════════════════════
+# VIEW 2 — EXECUTIVE
+# ══════════════════════════════════════════════════════════════════════════
+elif view == "📊 Executive":
+    st.title("📊 Executive Portfolio View")
+    st.markdown("Portfolio-level risk overview and IFRS 9 staging.")
+    st.markdown("---")
+
+    with st.spinner("Loading portfolio data..."):
+        try:
+            port = requests.get(f"{API_URL}/portfolio", timeout=30).json()
+
+            # ── Portfolio metrics ─────────────────────────────────────────
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total Loans", f"{port['total_loans']:,}")
+            m2.metric("Default Rate", f"{port['default_rate']:.1%}")
+            m3.metric("Avg Loan Size",
+                      f"KES {port['avg_credit_amount']:,.0f}")
+            m4.metric("Avg Income",
+                      f"KES {port['avg_income']:,.0f}")
+
+            st.markdown("---")
+
+            # ── IFRS 9 distribution ───────────────────────────────────────
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.subheader("IFRS 9 Stage Distribution")
+                stages = port["ifrs9_distribution"]
+                labels = ["Stage 1\n(Performing)",
+                          "Stage 2\n(Watch)",
+                          "Stage 3\n(Non-Performing)"]
+                values = [stages["stage_1"],
+                          stages["stage_2"],
+                          stages["stage_3"]]
+                colours = ["#2ECC71", "#E67E22", "#E74C3C"]
+
+                fig, ax = plt.subplots(figsize=(6, 4))
+                bars = ax.bar(labels, values, color=colours, alpha=0.85,
+                              edgecolor="white")
+                for bar, val in zip(bars, values):
+                    ax.text(bar.get_x() + bar.get_width() / 2,
+                            bar.get_height() + 500,
+                            f"{val:,}", ha="center", fontweight="bold")
+                ax.set_title("Loan Portfolio by IFRS 9 Stage",
+                             fontweight="bold")
+                ax.set_ylabel("Number of Loans")
+                ax.grid(axis="y", alpha=0.3)
+                st.pyplot(fig)
+                plt.close()
+
+            with col2:
+                st.subheader("Portfolio Risk Breakdown")
+                total = sum(values)
+                for label, val, colour in zip(
+                        ["Stage 1", "Stage 2", "Stage 3"],
+                        values, colours):
+                    pct = val / total
+                    st.markdown(f"**{label}**")
+                    st.progress(pct)
+                    st.caption(f"{val:,} loans ({pct:.1%})")
+
+        except Exception as e:
+            st.error(f"Could not load portfolio: {e}")
+
+    # ── Causal scenario ───────────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("📈 Causal Scenario Modelling")
+    st.markdown(
+        "Based on the Difference-in-Differences analysis, "
+        "estimate the portfolio impact of a macro shock."
+    )
+
+    shock_pct = st.slider(
+        "Income shock severity (% of borrowers affected)", 0, 50, 15
+    )
+    did_effect = -0.1125
+    affected   = int(port["total_loans"] * shock_pct / 100)
+    extra_defaults = int(affected * abs(did_effect) * 0.08)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Borrowers Affected", f"{affected:,}")
+    c2.metric("Estimated Extra Defaults", f"{extra_defaults:,}")
+    c3.metric("Portfolio Impact",
+              f"{extra_defaults / port['total_loans']:.2%}")
+
+# ══════════════════════════════════════════════════════════════════════════
+# VIEW 3 — POLICY & COMPLIANCE
+# ══════════════════════════════════════════════════════════════════════════
+elif view == "📋 Policy & Compliance":
+    st.title("📋 Policy & Compliance View")
+    st.markdown(
+        "Fairness audit results, causal evidence, and regulatory compliance."
+    )
+    st.markdown("---")
+
+    # ── Fairness metrics ──────────────────────────────────────────────────
+    st.subheader("Fairness Audit — Borrower Segments")
     try:
-        r = requests.post(f"{API_URL}/predict?borrower_id=demo", json=payload, timeout=5)
-        r.raise_for_status()
-        return r.json()
+        fairness_df = pd.read_csv("reports/fairness_metrics.csv")
+        st.dataframe(fairness_df, use_container_width=True)
     except Exception:
-        pd_val = 1 / (1 + np.exp(-(payload["amt_credit"] / payload["amt_income_total"] - 0.5) * 3))
-        stage = 1 if pd_val < 0.15 else (2 if pd_val < 0.40 else 3)
-        return {
-            "pd_point_estimate": round(pd_val, 4),
-            "pd_lower_95": round(max(0, pd_val - 0.08), 4),
-            "pd_upper_95": round(min(1, pd_val + 0.08), 4),
-            "ifrs9_stage": stage,
-            "ecl_estimate": round(pd_val * 0.45 * payload["amt_credit"], 2),
-            "recommendation": "APPROVE" if pd_val < 0.15 else ("MANUAL_REVIEW" if pd_val < 0.35 else "DECLINE"),
-            "explanation": f"Probability of default: {pd_val:.1%}",
-            "risk_factors": [],
-        }
-
-
-def loan_officer_view():
-    st.title("🏦 Loan Officer Dashboard")
-    st.caption("Fast credit decisions with causal AI support")
-
-    features = borrower_input_form()
-    if features is None:
-        st.info("Fill in the borrower details above and click **Assess Credit Risk**.")
-        return
-
-    with st.spinner("Running causal AI assessment..."):
-        result = call_api(features)
-
-    if result is None:
-        st.error("API unavailable. Start the API server: `uvicorn creditpulse.api.main:app`")
-        return
-
-    rec = result["recommendation"]
-    color = {"APPROVE": "green", "MANUAL_REVIEW": "orange", "DECLINE": "red"}[rec]
-    st.markdown(f"## Decision: :{color}[{rec}]")
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Probability of Default", f"{result['pd_point_estimate']:.1%}")
-    col2.metric("95% CI", f"{result['pd_lower_95']:.1%} – {result['pd_upper_95']:.1%}")
-    col3.metric("IFRS 9 Stage", f"Stage {result['ifrs9_stage']}")
-    col4.metric("Expected Credit Loss", f"KES {result['ecl_estimate']:,.0f}")
-
-    if result["risk_factors"]:
-        st.markdown("**Key risk drivers:**")
-        for rf in result["risk_factors"]:
-            st.markdown(f"- ⚠️ {rf}")
+        st.warning("Fairness metrics file not found.")
 
     st.markdown("---")
-    st.caption(f"*{result['explanation']}*")
 
+    # ── Causal evidence ───────────────────────────────────────────────────
+    st.subheader("Causal Evidence Summary")
+    col1, col2 = st.columns(2)
 
-def borrower_explainer_view():
-    st.title("👤 Borrower Explainer")
-    st.caption("Plain-English explanations for borrowers — CBK consumer protection aligned")
+    with col1:
+        st.markdown("**Difference-in-Differences (COVID Experiment)**")
+        st.metric("DiD Coefficient", "-0.1125")
+        st.metric("P-value", "0.002")
+        st.caption(
+            "Income shocks causally increase default risk among "
+            "vulnerable occupation borrowers."
+        )
 
-    features = borrower_input_form()
-    if features is None:
-        st.info("Enter your loan application details above.")
-        return
-
-    result = call_api(features)
-    if not result:
-        return
-
-    rec = result["recommendation"]
-    if rec == "APPROVE":
-        st.success("✅ Your application is likely to be **approved**.")
-        st.markdown("""
-        **What this means for you:**
-        Your financial profile shows a manageable level of risk. The lender is likely to offer you a loan at standard rates.
-        """)
-    elif rec == "MANUAL_REVIEW":
-        st.warning("🔍 Your application needs **manual review** by a loan officer.")
-        st.markdown("""
-        **What this means for you:**
-        Your application has been flagged for human review. This is not a rejection — a loan officer will look at your full case and may ask for additional documents.
-        """)
-    else:
-        st.error("❌ Based on your profile, this application is **likely to be declined**.")
-        st.markdown("""
-        **What you can do:**
-        - Reduce the loan amount
-        - Provide additional income documentation
-        - Build your M-Pesa transaction history over 3-6 months
-        - Ask about a smaller starter loan to build your credit record
-        """)
+    with col2:
+        st.markdown("**Regression Discontinuity**")
+        st.metric("LATE at Cut-off", "0.0058")
+        st.metric("P-value", "0.0028")
+        st.caption(
+            "Crossing the credit score threshold has a real causal "
+            "effect on default outcomes."
+        )
 
     st.markdown("---")
-    st.subheader("Why did we get this result?")
-    if result["risk_factors"]:
-        for rf in result["risk_factors"]:
-            st.markdown(f"- {rf}")
-    else:
-        st.markdown("- Your financial profile looks healthy — no major risk factors detected.")
 
-    st.info("📞 You have the right to request a full explanation from your loan officer under CBK Consumer Protection Guidelines.")
-
-
-def regulator_view():
-    st.title("📊 Regulator Dashboard")
-    st.caption("IFRS 9 portfolio view + fairness audit — CBK reporting ready")
-
-    np.random.seed(42)
-    n = 500
-
-    df = pd.DataFrame({
-        "borrower_id": range(n),
-        "pd": np.random.beta(2, 12, n),
-        "stage": np.random.choice([1, 2, 3], n, p=[0.75, 0.18, 0.07]),
-        "ecl": np.random.lognormal(10, 1.5, n),
-        "income_level": np.random.choice(["Low", "Medium", "High"], n, p=[0.4, 0.45, 0.15]),
-        "gender": np.random.choice(["M", "F"], n, p=[0.55, 0.45]),
-        "region": np.random.choice(["Nairobi", "Mombasa", "Kisumu", "Eldoret", "Rural"], n),
-    })
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Borrowers", f"{n:,}")
-    col2.metric("Avg PD", f"{df['pd'].mean():.1%}")
-    col3.metric("Total ECL", f"KES {df['ecl'].sum():,.0f}")
-    col4.metric("Stage 3 Rate", f"{(df['stage']==3).mean():.1%}")
+    # ── Model card ────────────────────────────────────────────────────────
+    st.subheader("SR 11-7 Model Card")
+    try:
+        with open("reports/model_card.md", "r", encoding="utf-8") as f:
+            model_card = f.read()
+        st.markdown(model_card)
+    except Exception:
+        st.warning("Model card not found.")
 
     st.markdown("---")
-    col_a, col_b = st.columns(2)
 
-    with col_a:
-        st.subheader("IFRS 9 Stage Distribution")
-        stage_counts = df["stage"].value_counts().sort_index()
-        st.bar_chart(stage_counts)
+    # ── Charts ────────────────────────────────────────────────────────────
+    st.subheader("Evidence Charts")
+    chart_files = {
+        "Causal DAG":               "reports/causal_dag.png",
+        "DiD Plot":                 "reports/did_plot.png",
+        "Regression Discontinuity": "reports/rd_plot.png",
+        "Fairness Audit":           "reports/fairness_audit.png",
+        "SHAP Feature Importance":  "reports/shap_summary.png",
+        "Survival Curves":          "reports/survival_curves.png",
+    }
 
-    with col_b:
-        st.subheader("PD by Income Level")
-        pd_by_income = df.groupby("income_level")["pd"].mean()
-        st.bar_chart(pd_by_income)
-
-    st.markdown("---")
-    st.subheader("Fairness Audit — PD by Demographic")
-    fairness = df.groupby("gender")["pd"].agg(["mean", "std"]).round(4)
-    fairness.columns = ["Mean PD", "Std PD"]
-    st.dataframe(fairness, use_container_width=True)
-
-    gender_gap = abs(df[df["gender"]=="M"]["pd"].mean() - df[df["gender"]=="F"]["pd"].mean())
-    if gender_gap < 0.02:
-        st.success(f"✅ Gender PD gap: {gender_gap:.1%} — within acceptable range (<2pp)")
-    else:
-        st.warning(f"⚠️ Gender PD gap: {gender_gap:.1%} — review required")
-
-
-def main():
-    view = sidebar()
-    if view == VIEWS[0]:
-        loan_officer_view()
-    elif view == VIEWS[1]:
-        borrower_explainer_view()
-    else:
-        regulator_view()
-
-
-if __name__ == "__main__":
-    main()
+    cols = st.columns(2)
+    for i, (title, path) in enumerate(chart_files.items()):
+        with cols[i % 2]:
+            st.markdown(f"**{title}**")
+            if Path(path).exists():
+                st.image(path)
+            else:
+                st.caption("Chart not available")
