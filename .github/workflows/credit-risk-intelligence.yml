@@ -1,0 +1,49 @@
+name: Credit Risk Intelligence CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install linters
+        run: pip install ruff black
+      - name: Ruff check
+        run: ruff check creditpulse/ --select E,F,I,N,W
+      - name: Black format check
+        run: black --check creditpulse/
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package with API and dev extras
+        run: pip install -e '.[dev,api]'
+      - name: Run tests
+        run: pytest tests/ -v --tb=short -p no:cacheprovider
+
+  typecheck:
+    name: Type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package
+        run: pip install -e '.[dev,api]'
+      - name: mypy
+        run: mypy creditpulse/ --ignore-missing-imports --no-strict-optional
